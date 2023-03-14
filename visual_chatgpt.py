@@ -915,10 +915,10 @@ if __name__ == '__main__':
                 gpu_usage = gr.Label("GPU Usage: ")
                 gpu_memory = gr.Label("GPU Memory Usage: ")
 
-        txt.submit(bot.run_text, [txt, state], [chatbot, state])
+        txt.submit(bot.run_text, [txt, state], [chatbot, state], api_name="chat")
         txt.submit(lambda: "", None, txt)
-        btn.upload(bot.run_image, [btn, state, txt], [chatbot, state, txt])
-        clear.click(bot.memory.clear)
+        btn.upload(bot.run_image, [btn, state, txt], [chatbot, state, txt], api_name="upload")
+        clear.click(bot.memory.clear, api_name="clear")
         clear.click(lambda: [], None, chatbot)
         clear.click(lambda: [], None, state)
 
