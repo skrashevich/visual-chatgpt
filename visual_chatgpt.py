@@ -90,7 +90,7 @@ def prompts(name, description):
 def cut_dialogue_history(history_memory, keep_last_n_words=500):
     tokens = history_memory.split()
     n_tokens = len(tokens)
-    print(f"hitory_memory:{history_memory}, n_tokens: {n_tokens}")
+    print(f"history_memory:{history_memory}, n_tokens: {n_tokens}")
     if n_tokens < keep_last_n_words:
         return history_memory
     else:
@@ -179,6 +179,9 @@ class ImageEditing:
         original_image = Image.open(image_path)
         original_size = original_image.size
         mask_image = self.mask_former.inference(image_path, to_be_replaced_txt)
+        if mask_image is None:
+            print(f"\nObject {to_be_replaced_txt} not found in the image")
+            return image_path
         updated_image = self.inpaint(prompt=replace_with_txt, image=original_image.resize((512, 512)),
                                      mask_image=mask_image.resize((512, 512))).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="replace-something")
