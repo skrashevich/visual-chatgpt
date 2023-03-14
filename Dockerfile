@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile-upstream:master-labs
 
-ARG PYTHON_VERSION=3.8
+ARG PYTHON_VERSION=3.10
 ARG PIP_CACHE_DIR=/var/cache/buildkit/pip
 ARG PIP_EXTRA_INDEX_URL=""
 ARG PIP_PRE=0
