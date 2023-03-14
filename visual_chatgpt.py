@@ -1,4 +1,6 @@
 import os
+import subprocess
+import psutil
 import gradio as gr
 import random
 import torch
@@ -179,6 +181,13 @@ class ImageEditing:
         original_image = Image.open(image_path)
         original_size = original_image.size
         mask_image = self.mask_former.inference(image_path, to_be_replaced_txt)
+        if mask_image is None:
+            print(f"\nObject {to_be_replaced_txt} not found in the image")
+            return image_path
+        
+        self.inpaint.pipe.enable_sequential_cpu_offload()
+        self.inpaint.enable_attention_slicing(1)
+        
         updated_image = self.inpaint(prompt=replace_with_txt, image=original_image.resize((512, 512)),
                                      mask_image=mask_image.resize((512, 512))).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="replace-something")
@@ -898,6 +907,12 @@ if __name__ == '__main__':
                 clear = gr.Button("Clear")
             with gr.Column(scale=0.15, min_width=0):
                 btn = gr.UploadButton("Upload", file_types=["image"])
+        
+        with gr.Row():
+            with gr.Column(scale=0.5):
+                cpu_usage = gr.Label("CPU Usage: ")
+                gpu_usage = gr.Label("GPU Usage: ")
+                gpu_memory = gr.Label("GPU Memory Usage: ")
 
         txt.submit(bot.run_text, [txt, state], [chatbot, state])
         txt.submit(lambda: "", None, txt)
@@ -905,4 +920,15 @@ if __name__ == '__main__':
         clear.click(bot.memory.clear)
         clear.click(lambda: [], None, chatbot)
         clear.click(lambda: [], None, state)
+
+        def update_usage():
+            cpu = psutil.cpu_percent()
+            gpu = psutil.sensors_gpu()[0].current
+            gpu_mem = int(subprocess.check_output(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"]).decode().strip())
+            cpu_usage.value = f"CPU Usage: {cpu}%"
+            gpu_usage.value = f"GPU Usage: {gpu}%"
+            gpu_memory.value = f"GPU Memory Usage: {gpu_mem} MB"
+
+        gr.Interface(update_usage, [], live=True, capture_session=True).launch()
+
         demo.launch(server_name="0.0.0.0", server_port=7868)
