@@ -71,4 +71,5 @@ RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
 ADD --link . /app/
 EXPOSE 7868
 ENV OPENAI_API_KEY=""
+VOLUME /root/.cache
 CMD python visual_chatgpt.py --load "ImageEditing_cuda:0,Text2Image_cuda:0,InstructPix2Pix_cpu,ImageCaptioning_cpu"
