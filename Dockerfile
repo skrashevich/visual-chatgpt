@@ -24,17 +24,9 @@ RUN \
   apt-get update \
   && apt-get install -y \
     --no-install-recommends \
-    bash curl wget \
+    bash curl wget python3-pip \
     libgl1-mesa-glx=20.3.* \
     libglib2.0-0=2.66.* 
-
-# Install miniconda
-ENV CONDA_DIR /opt/conda
-RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh && \
-     /bin/bash ~/miniconda.sh -b -p /opt/conda
-
-# Put conda in path so we can use conda activate
-ENV PATH=$CONDA_DIR/bin:$PATH
 
 # Prepare pip for buildkit cache
 ARG PIP_CACHE_DIR
@@ -51,36 +43,19 @@ ADD requirements.txt /app/requirements.txt
 
 WORKDIR /app
 
-# create a new environment
-RUN --mount=type=cache,target=/opt/conda/pkgs <<EOT
-#!/bin/bash
-conda config --set pip_interop_enabled 1
-conda config --set auto_update_conda 0
-conda config --set rollback_enabled 0
-conda init bash
-. /root/.bashrc
-conda create -n visgpt python=${PYTHON_VERSION}
-
-# activate the new environment
-conda activate visgpt
-conda install pip
-
-EOT
-
 FROM python-base AS builder
+ARG PIP_CACHE_DIR
 WORKDIR /app
 #  prepare the basic environments
-RUN --mount=type=cache,target=${PIP_CACHE_DIR} pip wheel --wheel-dir=/wheels -r requirements.txt
+RUN --mount=type=cache,target=${PIP_CACHE_DIR} pip wheel --pre --extra-index-url https://download.pytorch.org/whl/nightly/cu117 --wheel-dir=/wheels -r requirements.txt
 
 
 FROM python-base
+ARG PIP_CACHE_DIR
 WORKDIR /app
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
-    --mount=type=cache,target=/opt/conda/pkgs \
     --mount=type=cache,target=${PIP_CACHE_DIR} \
-    pip install --find-links /wheels -r requirements.txt \
-    && conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch-nightly -c nvidia \
-    && conda clean -a
+    pip install --find-links /wheels -r requirements.txt
 ADD --link . /app/
 EXPOSE 7868
 ENV OPENAI_API_KEY=""
