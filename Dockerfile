@@ -47,7 +47,7 @@ ADD requirements.txt /app/requirements.txt
 WORKDIR /app
 
 # create a new environment
-RUN <<EOT
+RUN --mount=type=cache,target=/opt/conda/pkgs <<EOT
 #!/bin/bash
 conda init bash
 . /root/.bashrc
@@ -67,8 +67,10 @@ RUN --mount=type=cache,target=${PIP_CACHE_DIR} pip wheel --wheel-dir=/wheels -r 
 FROM python-base
 WORKDIR /app
 RUN --mount=type=bind,from=builder,source=/wheels,target=/wheels \
-    pip install --find-links /wheels -r requirements.txt
-RUN conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch-nightly -c nvidia
+    --mount=type=cache,target=/opt/conda/pkgs \
+    --mount=type=cache,target=${PIP_CACHE_DIR} \
+    pip install --find-links /wheels -r requirements.txt \
+    && conda install pytorch torchvision torchaudio pytorch-cuda=11.7 -c pytorch-nightly -c nvidia
 ADD --link . /app/
 EXPOSE 7868
 ENV OPENAI_API_KEY=""
