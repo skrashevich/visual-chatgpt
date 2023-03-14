@@ -930,6 +930,5 @@ if __name__ == '__main__':
             gpu_usage.value = f"GPU Usage: {gpu}%"
             gpu_memory.value = f"GPU Memory Usage: {gpu_mem} MB"
 
-        gr.Interface(update_usage, [], live=True, capture_session=True).launch()
 
         demo.launch(server_name="0.0.0.0", server_port=7868)
