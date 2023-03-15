@@ -11,7 +11,7 @@ from PIL import Image, ImageOps
 import numpy as np
 import argparse
 
-from transformers import AutoModelForCausalLM, AutoTokenizer, CLIPSegProcessor, CLIPSegForImageSegmentation
+from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 from transformers import pipeline, BlipProcessor, BlipForConditionalGeneration, BlipForQuestionAnswering
 from transformers import AutoImageProcessor, UperNetForSemanticSegmentation
 
@@ -92,18 +92,19 @@ def prompts(name, description):
 
 
 def cut_dialogue_history(history_memory, keep_last_n_words=500):
+    if history_memory is None or len(history_memory) == 0:
+        return history_memory
     tokens = history_memory.split()
     n_tokens = len(tokens)
-    print(f"hitory_memory:{history_memory}, n_tokens: {n_tokens}")
+    print(f"history_memory:{history_memory}, n_tokens: {n_tokens}")
     if n_tokens < keep_last_n_words:
         return history_memory
-    else:
-        paragraphs = history_memory.split('\n')
-        last_n_tokens = n_tokens
-        while last_n_tokens >= keep_last_n_words:
-            last_n_tokens = last_n_tokens - len(paragraphs[0].split(' '))
-            paragraphs = paragraphs[1:]
-        return '\n' + '\n'.join(paragraphs)
+    paragraphs = history_memory.split('\n')
+    last_n_tokens = n_tokens
+    while last_n_tokens >= keep_last_n_words:
+        last_n_tokens -= len(paragraphs[0].split(' '))
+        paragraphs = paragraphs[1:]
+    return '\n' + '\n'.join(paragraphs)
 
 
 def get_new_image_name(org_img_name, func_name="update"):
@@ -111,22 +112,20 @@ def get_new_image_name(org_img_name, func_name="update"):
     head = head_tail[0]
     tail = head_tail[1]
     name_split = tail.split('.')[0].split('_')
-    this_new_uuid = str(uuid.uuid4())[0:4]
+    this_new_uuid = str(uuid.uuid4())[:4]
     if len(name_split) == 1:
         most_org_file_name = name_split[0]
-        recent_prev_file_name = name_split[0]
-        new_file_name = '{}_{}_{}_{}.png'.format(this_new_uuid, func_name, recent_prev_file_name, most_org_file_name)
     else:
         assert len(name_split) == 4
         most_org_file_name = name_split[3]
-        recent_prev_file_name = name_split[0]
-        new_file_name = '{}_{}_{}_{}.png'.format(this_new_uuid, func_name, recent_prev_file_name, most_org_file_name)
+    recent_prev_file_name = name_split[0]
+    new_file_name = f'{this_new_uuid}_{func_name}_{recent_prev_file_name}_{most_org_file_name}.png'
     return os.path.join(head, new_file_name)
 
 
 class MaskFormer:
     def __init__(self, device):
-        print("Initializing MaskFormer to %s" % device)
+        print(f"Initializing MaskFormer to {device}")
         self.device = device
         self.processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
         self.model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined").to(device)
@@ -156,7 +155,7 @@ class MaskFormer:
 
 class ImageEditing:
     def __init__(self, device):
-        print("Initializing ImageEditing to %s" % device)
+        print(f"Initializing ImageEditing to {device}")
         self.device = device
         self.mask_former = MaskFormer(device=self.device)
         self.revision = 'fp16' if 'cuda' in device else None
@@ -169,16 +168,16 @@ class ImageEditing:
     @prompts(name="Remove Something From The Photo",
              description="useful when you want to remove and object or something from the photo "
                          "from its description or location. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the object need to be removed. ")
     def inference_remove(self, inputs):
-        image_path, to_be_removed_txt = inputs.split(",")
+        image_path, to_be_removed_txt = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         return self.inference_replace(f"{image_path},{to_be_removed_txt},background")
 
     @prompts(name="Replace Something From The Photo",
              description="useful when you want to replace an object from the object description or "
                          "location with another object from its description. "
-                         "The input to this tool should be a comma seperated string of three, "
+                         "The input to this tool should be a comma separated string of three, "
                          "representing the image_path, the object to be replaced, the object to be replaced with ")
     def inference_replace(self, inputs):
         image_path, to_be_replaced_txt, replace_with_txt = inputs.split(",")
@@ -202,7 +201,7 @@ class ImageEditing:
 
 class InstructPix2Pix:
     def __init__(self, device):
-        print("Initializing InstructPix2Pix to %s" % device)
+        print(f"Initializing InstructPix2Pix to {device}")
         self.device = device
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained("timbrooks/instruct-pix2pix",
@@ -214,7 +213,7 @@ class InstructPix2Pix:
     @prompts(name="Instruct Image Using Text",
              description="useful when you want to the style of the image to be like the text. "
                          "like: make it look like a painting. or make it like a robot. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the text. ")
     def inference(self, inputs):
         """Change style of image."""
@@ -231,7 +230,7 @@ class InstructPix2Pix:
 
 class Text2Image:
     def __init__(self, device):
-        print("Initializing Text2Image to %s" % device)
+        print(f"Initializing Text2Image to {device}")
         self.device = device
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5",
@@ -247,7 +246,7 @@ class Text2Image:
                          "like: generate an image of an object or something, or generate an image that includes some objects. "
                          "The input to this tool should be a string, representing the text used to generate image. ")
     def inference(self, text):
-        image_filename = os.path.join('image', str(uuid.uuid4())[0:8] + ".png")
+        image_filename = os.path.join('image', f"{str(uuid.uuid4())[:8]}.png")
         prompt = text + ', ' + self.a_prompt
         image = self.pipe(prompt, negative_prompt=self.n_prompt).images[0]
         image.save(image_filename)
@@ -258,7 +257,7 @@ class Text2Image:
 
 class ImageCaptioning:
     def __init__(self, device):
-        print("Initializing ImageCaptioning to %s" % device)
+        print(f"Initializing ImageCaptioning to {device}")
         self.device = device
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -302,7 +301,7 @@ class Image2Canny:
 
 class CannyText2Image:
     def __init__(self, device):
-        print("Initializing CannyText2Image to %s" % device)
+        print(f"Initializing CannyText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained("fusing/stable-diffusion-v1-5-controlnet-canny",
                                                           torch_dtype=self.torch_dtype)
@@ -314,20 +313,20 @@ class CannyText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, ' \
-                        'fewer digits, cropped, worst quality, low quality'
+                            'fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Canny Image",
-             description="useful when you want to generate a new real image from both the user desciption and a canny image."
+             description="useful when you want to generate a new real image from both the user description and a canny image."
                          " like: generate a real image of a object or something from this canny image,"
                          " or generate a new real image of a object or something from this edge image. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description. ")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="canny2image")
@@ -345,7 +344,7 @@ class Image2Line:
     @prompts(name="Line Detection On Image",
              description="useful when you want to detect the straight line of the image. "
                          "like: detect the straight lines of this image, or straight line detection on image, "
-                         "or peform straight line detection on this image, or detect the straight line image of this image. "
+                         "or perform straight line detection on this image, or detect the straight line image of this image. "
                          "The input to this tool should be a string, representing the image_path")
     def inference(self, inputs):
         image = Image.open(inputs)
@@ -358,7 +357,7 @@ class Image2Line:
 
 class LineText2Image:
     def __init__(self, device):
-        print("Initializing LineText2Image to %s" % device)
+        print(f"Initializing LineText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained("fusing/stable-diffusion-v1-5-controlnet-mlsd",
                                                           torch_dtype=self.torch_dtype)
@@ -371,21 +370,21 @@ class LineText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, ' \
-                        'fewer digits, cropped, worst quality, low quality'
+                            'fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Line Image",
-             description="useful when you want to generate a new real image from both the user desciption "
+             description="useful when you want to generate a new real image from both the user description "
                          "and a straight line image. "
                          "like: generate a real image of a object or something from this straight line image, "
                          "or generate a new real image of a object or something from this straight lines. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description. ")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="line2image")
@@ -403,7 +402,7 @@ class Image2Hed:
     @prompts(name="Hed Detection On Image",
              description="useful when you want to detect the soft hed boundary of the image. "
                          "like: detect the soft hed boundary of this image, or hed boundary detection on image, "
-                         "or peform hed boundary detection on this image, or detect soft hed boundary image of this image. "
+                         "or perform hed boundary detection on this image, or detect soft hed boundary image of this image. "
                          "The input to this tool should be a string, representing the image_path")
     def inference(self, inputs):
         image = Image.open(inputs)
@@ -416,7 +415,7 @@ class Image2Hed:
 
 class HedText2Image:
     def __init__(self, device):
-        print("Initializing HedText2Image to %s" % device)
+        print(f"Initializing HedText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained("fusing/stable-diffusion-v1-5-controlnet-hed",
                                                           torch_dtype=self.torch_dtype)
@@ -429,21 +428,21 @@ class HedText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, ' \
-                        'fewer digits, cropped, worst quality, low quality'
+                            'fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Soft Hed Boundary Image",
-             description="useful when you want to generate a new real image from both the user desciption "
+             description="useful when you want to generate a new real image from both the user description "
                          "and a soft hed boundary image. "
                          "like: generate a real image of a object or something from this soft hed boundary image, "
                          "or generate a new real image of a object or something from this hed boundary. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="hed2image")
@@ -474,7 +473,7 @@ class Image2Scribble:
 
 class ScribbleText2Image:
     def __init__(self, device):
-        print("Initializing ScribbleText2Image to %s" % device)
+        print(f"Initializing ScribbleText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained("fusing/stable-diffusion-v1-5-controlnet-scribble",
                                                           torch_dtype=self.torch_dtype)
@@ -487,19 +486,19 @@ class ScribbleText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, ' \
-                        'fewer digits, cropped, worst quality, low quality'
+                            'fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Sketch Image",
-             description="useful when you want to generate a new real image from both the user desciption and "
+             description="useful when you want to generate a new real image from both the user description and "
                          "a scribble image or a sketch image. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="scribble2image")
@@ -529,7 +528,7 @@ class Image2Pose:
 
 class PoseText2Image:
     def __init__(self, device):
-        print("Initializing PoseText2Image to %s" % device)
+        print(f"Initializing PoseText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained("fusing/stable-diffusion-v1-5-controlnet-openpose",
                                                           torch_dtype=self.torch_dtype)
@@ -543,21 +542,21 @@ class PoseText2Image:
         self.unconditional_guidance_scale = 9.0
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit,' \
-                        ' fewer digits, cropped, worst quality, low quality'
+                            ' fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Pose Image",
-             description="useful when you want to generate a new real image from both the user desciption "
+             description="useful when you want to generate a new real image from both the user description "
                          "and a human pose image. "
                          "like: generate a real image of a human from this human pose image, "
                          "or generate a new real image of a human from this pose. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="pose2image")
@@ -614,7 +613,7 @@ class Image2Seg:
     @prompts(name="Segmentation On Image",
              description="useful when you want to detect segmentations of the image. "
                          "like: segment this image, or generate segmentations on this image, "
-                         "or peform segmentation on this image. "
+                         "or perform segmentation on this image. "
                          "The input to this tool should be a string, representing the image_path")
     def inference(self, inputs):
         image = Image.open(inputs)
@@ -636,7 +635,7 @@ class Image2Seg:
 
 class SegText2Image:
     def __init__(self, device):
-        print("Initializing SegText2Image to %s" % device)
+        print(f"Initializing SegText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained("fusing/stable-diffusion-v1-5-controlnet-seg",
                                                           torch_dtype=self.torch_dtype)
@@ -648,20 +647,20 @@ class SegText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit,' \
-                        ' fewer digits, cropped, worst quality, low quality'
+                            ' fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Segmentations",
-             description="useful when you want to generate a new real image from both the user desciption and segmentations. "
+             description="useful when you want to generate a new real image from both the user description and segmentations. "
                          "like: generate a real image of a object or something from this segmentation image, "
                          "or generate a new real image of a object or something from these segmentations. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="segment2image")
@@ -695,7 +694,7 @@ class Image2Depth:
 
 class DepthText2Image:
     def __init__(self, device):
-        print("Initializing DepthText2Image to %s" % device)
+        print(f"Initializing DepthText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained(
             "fusing/stable-diffusion-v1-5-controlnet-depth", torch_dtype=self.torch_dtype)
@@ -707,20 +706,20 @@ class DepthText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit,' \
-                        ' fewer digits, cropped, worst quality, low quality'
+                            ' fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Depth",
-             description="useful when you want to generate a new real image from both the user desciption and depth image. "
+             description="useful when you want to generate a new real image from both the user description and depth image. "
                          "like: generate a real image of a object or something from this depth image, "
                          "or generate a new real image of a object or something from the depth map. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="depth2image")
@@ -766,7 +765,7 @@ class Image2Normal:
 
 class NormalText2Image:
     def __init__(self, device):
-        print("Initializing NormalText2Image to %s" % device)
+        print(f"Initializing NormalText2Image to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.controlnet = ControlNetModel.from_pretrained(
             "fusing/stable-diffusion-v1-5-controlnet-normal", torch_dtype=self.torch_dtype)
@@ -778,20 +777,20 @@ class NormalText2Image:
         self.seed = -1
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit,' \
-                        ' fewer digits, cropped, worst quality, low quality'
+                            ' fewer digits, cropped, worst quality, low quality'
 
     @prompts(name="Generate Image Condition On Normal Map",
-             description="useful when you want to generate a new real image from both the user desciption and normal map. "
+             description="useful when you want to generate a new real image from both the user description and normal map. "
                          "like: generate a real image of a object or something from this normal map, "
                          "or generate a new real image of a object or something from the normal map. "
-                         "The input to this tool should be a comma seperated string of two, "
+                         "The input to this tool should be a comma separated string of two, "
                          "representing the image_path and the user description")
     def inference(self, inputs):
         image_path, instruct_text = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         image = Image.open(image_path)
         self.seed = random.randint(0, 65535)
         seed_everything(self.seed)
-        prompt = instruct_text + ', ' + self.a_prompt
+        prompt = f'{instruct_text}, {self.a_prompt}'
         image = self.pipe(prompt, image, num_inference_steps=20, eta=0.0, negative_prompt=self.n_prompt,
                           guidance_scale=9.0).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="normal2image")
@@ -803,7 +802,7 @@ class NormalText2Image:
 
 class VisualQuestionAnswering:
     def __init__(self, device):
-        print("Initializing VisualQuestionAnswering to %s" % device)
+        print(f"Initializing VisualQuestionAnswering to {device}")
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.device = device
         self.processor = BlipProcessor.from_pretrained("Salesforce/blip-vqa-base")
@@ -813,9 +812,9 @@ class VisualQuestionAnswering:
     @prompts(name="Answer Question About The Image",
              description="useful when you need an answer for a question based on an image. "
                          "like: what is the background color of the last image, how many cats in this figure, what is in this figure. "
-                         "The input to this tool should be a comma seperated string of two, representing the image_path and the question")
+                         "The input to this tool should be a comma separated string of two, representing the image_path and the question")
     def inference(self, inputs):
-        image_path, question = inputs.split(",")
+        image_path, question = inputs.split(",")[0], ','.join(inputs.split(',')[1:])
         raw_image = Image.open(image_path).convert('RGB')
         inputs = self.processor(raw_image, question, return_tensors="pt").to(self.device, self.torch_dtype)
         out = self.model.generate(**inputs)
@@ -835,12 +834,12 @@ class ConversationBot:
         self.llm = OpenAI(temperature=0)
         self.memory = ConversationBufferMemory(memory_key="chat_history", output_key='output')
 
-        self.models = dict()
+        self.models = {}
         for class_name, device in load_dict.items():
             self.models[class_name] = globals()[class_name](device=device)
 
         self.tools = []
-        for class_name, instance in self.models.items():
+        for instance in self.models.values():
             for e in dir(instance):
                 if e.startswith('inference'):
                     func = getattr(instance, e)
@@ -867,7 +866,7 @@ class ConversationBot:
         return state, state
 
     def run_image(self, image, state, txt):
-        image_filename = os.path.join('image', str(uuid.uuid4())[0:8] + ".png")
+        image_filename = os.path.join('image', f"{str(uuid.uuid4())[:8]}.png")
         print("======>Auto Resize Image...")
         img = Image.open(image.name)
         img = ImageOps.exif_transpose(img)
@@ -881,17 +880,13 @@ class ConversationBot:
         img.save(image_filename, "PNG")
         print(f"Resize image form {width}x{height} to {width_new}x{height_new}")
         description = self.models['ImageCaptioning'].inference(image_filename)
-        Human_prompt = "\nHuman: provide a figure named {}. The description is: {}. " \
-                       "This information helps you to understand this image, " \
-                       "but you should use tools to finish following tasks, " \
-                       "rather than directly imagine from my description. If you understand, say \"Received\". \n".format(
-            image_filename, description)
+        Human_prompt = f'\nHuman: provide a figure named {image_filename}. The description is: {description}. This information helps you to understand this image, but you should use tools to finish following tasks, rather than directly imagine from my description. If you understand, say \"Received\". \n'
         AI_prompt = "Received.  "
         self.agent.memory.buffer = self.agent.memory.buffer + Human_prompt + 'AI: ' + AI_prompt
         state = state + [(f"![](/file={image_filename})*{image_filename}*", AI_prompt)]
         print(f"\nProcessed run_image, Input image: {image_filename}\nCurrent state: {state}\n"
               f"Current Memory: {self.agent.memory.buffer}")
-        return state, state, txt + ' ' + image_filename + ' '
+        return state, state, f'{txt} {image_filename} '
 
     def update_usage(self):
         cpu = psutil.cpu_percent()
