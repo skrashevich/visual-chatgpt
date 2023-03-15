@@ -56,6 +56,8 @@ Thought: Do I need to use a tool? No
 ```
 """
 
+
+
 VISUAL_CHATGPT_SUFFIX = """You are very strict to the filename correctness and will never fake a file name if it does not exist.
 You will remember to provide the image file name loyally if it's provided in the last tool observation.
 
@@ -161,6 +163,8 @@ class ImageEditing:
         self.torch_dtype = torch.float16 if 'cuda' in device else torch.float32
         self.inpaint = StableDiffusionInpaintPipeline.from_pretrained(
             "runwayml/stable-diffusion-inpainting", revision=self.revision, torch_dtype=self.torch_dtype).to(device)
+        self.inpaint.enable_sequential_cpu_offload()
+        self.inpaint.enable_attention_slicing(1)
 
     @prompts(name="Remove Something From The Photo",
              description="useful when you want to remove and object or something from the photo "
@@ -185,9 +189,6 @@ class ImageEditing:
             print(f"\nObject {to_be_replaced_txt} not found in the image")
             return image_path
         
-        self.inpaint.pipe.enable_sequential_cpu_offload()
-        self.inpaint.enable_attention_slicing(1)
-        
         updated_image = self.inpaint(prompt=replace_with_txt, image=original_image.resize((512, 512)),
                                      mask_image=mask_image.resize((512, 512))).images[0]
         updated_image_path = get_new_image_name(image_path, func_name="replace-something")
@@ -208,7 +209,8 @@ class InstructPix2Pix:
                                                                            safety_checker=None,
                                                                            torch_dtype=self.torch_dtype).to(device)
         self.pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(self.pipe.scheduler.config)
-
+        self.pipe.enable_sequential_cpu_offload()
+        self.pipe.enable_attention_slicing(1)
     @prompts(name="Instruct Image Using Text",
              description="useful when you want to the style of the image to be like the text. "
                          "like: make it look like a painting. or make it like a robot. "
@@ -238,7 +240,8 @@ class Text2Image:
         self.a_prompt = 'best quality, extremely detailed'
         self.n_prompt = 'longbody, lowres, bad anatomy, bad hands, missing fingers, extra digit, ' \
                         'fewer digits, cropped, worst quality, low quality'
-
+        self.pipe.enable_sequential_cpu_offload()
+        self.pipe.enable_attention_slicing(1)
     @prompts(name="Generate Image From User Input Text",
              description="useful when you want to generate an image from a user input text and save it to a file. "
                          "like: generate an image of an object or something, or generate an image that includes some objects. "
@@ -890,6 +893,12 @@ class ConversationBot:
               f"Current Memory: {self.agent.memory.buffer}")
         return state, state, txt + ' ' + image_filename + ' '
 
+    def update_usage(self):
+        cpu = psutil.cpu_percent()
+        gpu = int(subprocess.check_output(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"]).decode().strip())
+        gpu_mem = int(subprocess.check_output(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"]).decode().strip())
+        return f"CPU: {cpu}% GPU: {gpu}% VRAM: {gpu_mem} MB"
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -911,24 +920,14 @@ if __name__ == '__main__':
         
         with gr.Row():
             with gr.Column(scale=0.5):
-                cpu_usage = gr.Label("CPU Usage: ")
-                gpu_usage = gr.Label("GPU Usage: ")
-                gpu_memory = gr.Label("GPU Memory Usage: ")
+                stats = gr.Label(bot.update_usage, every=1)
 
-        txt.submit(bot.run_text, [txt, state], [chatbot, state], api_name="chat")
-        txt.submit(lambda: "", None, txt)
-        btn.upload(bot.run_image, [btn, state, txt], [chatbot, state, txt], api_name="upload")
-        clear.click(bot.memory.clear, api_name="clear")
-        clear.click(lambda: [], None, chatbot)
-        clear.click(lambda: [], None, state)
-
-        def update_usage():
-            cpu = psutil.cpu_percent()
-            gpu = psutil.sensors_gpu()[0].current
-            gpu_mem = int(subprocess.check_output(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"]).decode().strip())
-            cpu_usage.value = f"CPU Usage: {cpu}%"
-            gpu_usage.value = f"GPU Usage: {gpu}%"
-            gpu_memory.value = f"GPU Memory Usage: {gpu_mem} MB"
+        txt.submit(bot.run_text, [txt, state], [chatbot, state], api_name="chat", queue=False)
+        txt.submit(lambda: "", None, txt, queue=False)
+        btn.upload(bot.run_image, [btn, state, txt], [chatbot, state, txt], api_name="upload", queue=False)
+        clear.click(bot.memory.clear, api_name="clear", queue=False)
+        clear.click(lambda: [], None, chatbot, queue=False)
+        clear.click(lambda: [], None, state, queue=False)
 
 
-        demo.launch(server_name="0.0.0.0", server_port=7868)
+        demo.queue().launch(server_name="0.0.0.0", server_port=7868)
